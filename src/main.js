@@ -98,6 +98,18 @@ function home() {
 /* ---------- OCR ---------- */
 let workerP = null;
 let onProgress = () => {};
+let onStage = () => {};
+let lastStage = 'başlıyor';
+const STAGES = {
+  'loading tesseract core': 'Okuma motoru yükleniyor',
+  'initializing tesseract': 'Okuma motoru başlatılıyor',
+  'initialized tesseract': 'Okuma motoru hazır',
+  'loading language traineddata': 'Dil dosyası yükleniyor',
+  'loaded language traineddata': 'Dil dosyası yüklendi',
+  'initializing api': 'Hazırlanıyor',
+  'initialized api': 'Hazır',
+  'recognizing text': 'Yazılar çözülüyor',
+};
 function getWorker() {
   if (!workerP) {
     workerP = import('tesseract.js').then(({ createWorker }) => {
@@ -106,8 +118,15 @@ function getWorker() {
         workerPath: `${base}worker.min.js`,
         corePath: base,
         langPath: base.replace(/\/$/, ''),
-        gzip: true,
-        logger: (m) => { if (m.status === 'recognizing text') onProgress(0.25 + m.progress * 0.75); else if (m.progress) onProgress(m.progress * 0.25); },
+        gzip: false,
+        workerBlobURL: false,
+        cacheMethod: 'none',
+        logger: (m) => {
+          lastStage = m.status;
+          onStage(STAGES[m.status] || m.status);
+          if (m.status === 'recognizing text') onProgress(0.25 + m.progress * 0.75); else if (m.progress) onProgress(m.progress * 0.25);
+        },
+        errorHandler: (e) => { lastStage = `hata: ${e}`; },
       }).then(async (w) => {
         await w.setParameters({ tessedit_pageseg_mode: '11', preserve_interword_spaces: '1' });
         return w;
@@ -191,14 +210,23 @@ async function run(file) {
   } else $('scan').style.display = 'none';
 
   const barI = $('barI');
-  onProgress = (p) => { barI.style.width = `${Math.round(Math.min(1, p) * 100)}%`; };
+  let tick = Date.now();
+  onProgress = (p) => { tick = Date.now(); barI.style.width = `${Math.round(Math.min(1, p) * 100)}%`; };
+  onStage = (t) => { tick = Date.now(); const el = $('stTxt'); if (el) el.textContent = t; };
+  let watch;
+  const stall = new Promise((_, rej) => {
+    watch = setInterval(() => { if (Date.now() - tick > 45000) rej(new Error(`45 saniyedir ilerleme yok (${lastStage})`)); }, 1000);
+  });
 
   try {
+    onStage('Resim hazırlanıyor');
     const img = await loadImg(url);
     const prep = await prepare(img);
-    const worker = await getWorker();
-    $('stTxt').textContent = 'Yazılar çözülüyor';
-    const { data } = await worker.recognize(prep.canvas, {}, { blocks: true });
+    onStage('Okuma motoru yükleniyor');
+    const worker = await Promise.race([getWorker(), stall]);
+    onStage('Yazılar çözülüyor');
+    const { data } = await Promise.race([worker.recognize(prep.canvas, {}, { blocks: true }), stall]);
+    clearInterval(watch);
     const words = [];
     for (const b of data.blocks || []) for (const p of b.paragraphs) for (const l of p.lines) for (const w of l.words) words.push({ t: w.text, ...w.bbox });
     current = { url, words, W: prep.W, H: prep.H, colorOf: prep.colorOf };
@@ -211,8 +239,10 @@ async function run(file) {
     $('status').remove();
     show();
   } catch (err) {
+    clearInterval(watch);
     if (scanAnim) scanAnim.stop();
-    $('view').innerHTML = `<div class="miss"><h2>Liste okunamadı</h2><p>Resim açılamadı ya da okuma başlatılamadı. Başka bir ekran görüntüsüyle tekrar dene.</p></div>
+    workerP = null;
+    $('view').innerHTML = `<div class="miss"><h2>Liste okunamadı</h2><p>Okuma tamamlanamadı. Tekrar dene. Yine olmazsa bu ekranın görüntüsünü gönder.</p><p style="font-size:13px">Ayrıntı: ${esc(err && err.message ? err.message : String(err))} · ${esc(lastStage)}</p></div>
       <button class="again" id="again">Başka resim seç</button>`;
     $('again').addEventListener('click', () => $('file').click());
     console.error(err);
