@@ -141,6 +141,24 @@ function loadImg(url) {
   return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
 }
 
+function classify(d) {
+  let green = 0;
+  let ink = 0;
+  let yellow = 0;
+  let bg = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    bg++;
+    if (r > 190 && g > 170 && b < 140 && r - b > 90) yellow++;
+    if (Math.min(r, g, b) < 170 && !(b < 140 && r > 190 && g > 170)) { ink++; if (g > r + 30 && g > b + 10) green++; }
+  }
+  if (bg && yellow / bg > 0.3) return 'yellow';
+  if (ink && green / ink > 0.4) return 'green';
+  return null;
+}
+
 async function prepare(img) {
   const W = 1000;
   const H = Math.round((img.naturalHeight * W) / img.naturalWidth);
@@ -166,18 +184,11 @@ async function prepare(img) {
   bctx.imageSmoothingQuality = 'high';
   bctx.drawImage(gc, 0, 0, W * 2, H * 2);
   const colorOf = (seg) => {
-    const x0 = Math.floor(seg.x0 / 2);
-    const y0 = Math.floor(seg.y0 / 2);
-    const w = Math.max(1, Math.ceil((seg.x1 - seg.x0) / 2));
-    const h = Math.max(1, Math.ceil((seg.y1 - seg.y0) / 2));
-    const d = ctx.getImageData(x0, y0, w, h).data;
-    let green = 0;
-    let ink = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      const [r, gg, b] = [d[i], d[i + 1], d[i + 2]];
-      if (r + gg + b < 600) { ink++; if (gg > r + 30 && gg > b + 10) green++; }
-    }
-    return ink && green / ink > 0.4 ? 'green' : null;
+    const x0 = Math.max(0, Math.floor(seg.x0 / 2) - 2);
+    const y0 = Math.max(0, Math.floor(seg.y0 / 2) - 2);
+    const w = Math.max(1, Math.ceil((seg.x1 - seg.x0) / 2) + 4);
+    const h = Math.max(1, Math.ceil((seg.y1 - seg.y0) / 2) + 4);
+    return classify(ctx.getImageData(x0, y0, Math.min(w, W - x0), Math.min(h, H - y0)).data);
   };
   return { canvas: big, W: W * 2, H: H * 2, colorOf };
 }
