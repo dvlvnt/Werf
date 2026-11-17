@@ -108,7 +108,7 @@ button { background: none; border: 0; cursor: pointer; }
   border-radius: 28px; padding: 22px 20px 20px;
   box-shadow: 0 -10px 40px rgba(0, 0, 0, .35);
 }
-.card-head { display: flex; align-items: flex-start; gap: 14px; }
+.card-head { display: flex; align-items: center; gap: 14px; }
 .pin-wrap { position: relative; width: 44px; height: 54px; flex: none; }
 .pin { position: absolute; left: 6px; top: 0; }
 .ring {
@@ -191,3 +191,17 @@ button { background: none; border: 0; cursor: pointer; }
   font-size: 18px; font-weight: 700; color: var(--graphite);
 }
 .sheet .go { box-shadow: none; }
+
+.count { margin-top: 8px; font-weight: 800; font-stretch: 118%; font-size: 26px; }
+.stop { display: flex; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 2px dashed #D3CEC3; }
+.card-head + .stop { border-top: 0; padding-top: 4px; }
+.stop-n {
+  flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--graphite); color: var(--bone);
+  display: grid; place-items: center; font-weight: 800; font-size: 17px; margin-top: 2px;
+}
+.stop-body { flex: 1; min-width: 0; }
+.kind { display: inline-block; font-size: 12.5px; font-weight: 700; color: var(--orange-deep); margin-bottom: 2px; }
+.stop .company { margin-top: 0; }
+.notes { margin-top: 8px; }
+.go.small { padding: 13px; font-size: 16px; margin-top: 12px; box-shadow: none; }
+.route-btn { background: var(--graphite); color: var(--bone); box-shadow: none; margin-top: 18px; }

@@ -151,15 +151,49 @@ export function analyze(words, width, name, colorOf = () => null) {
   let result = null;
   let mates = [];
   if (cands.length) {
-    result = finish(siteAt(col, cands[0]));
-    const top = (result.companyBox || result.streetBox).y0 - 4;
-    const after = result.streetBox;
-    const nextSite = col.filter((s) => s.color !== 'yellow' && s.yc > Math.max(after.yc, hit.yc) + hit.h * 0.6).sort((a, b) => a.yc - b.yc)[0];
-    const section = segs.filter((s) => /^(TRANSPORT|AFWEZIGEN)/i.test(s.text) && s.yc > hit.yc).sort((a, b) => a.yc - b.yc)[0];
-    const bottom = Math.min(nextSite ? nextSite.y0 : Infinity, section ? section.y0 : Infinity, hit.y1 + hit.h * 12);
-    result.notes = col.filter((s) => s.color === 'yellow' && s.yc > after.yc && s.y1 <= bottom + 2).map((s) => s.text);
-    mates = segs.filter((s) => s !== hit && Math.abs(s.x0 - hit.x0) < width * 0.05 && s.y0 > top && s.y1 < bottom
-      && /^[A-ZÀ-Ý][a-zà-ÿ]+ [A-ZÀ-Ý]/.test(s.text)).map((s) => s.text);
+    const chosen = siteAt(col, cands[0]);
+    // sütundaki tüm adres blokları (firma + sokak + sarı notlar)
+    const plain = col.filter((x) => x.color !== 'yellow').sort((p, q) => p.yc - q.yc);
+    const used = new Set();
+    const blocks = [];
+    for (const sg of plain) {
+      if (used.has(sg)) continue;
+      const st = siteAt(col, sg);
+      if (st.companyBox && used.has(st.companyBox)) continue;
+      if (st.companyBox) used.add(st.companyBox);
+      used.add(st.streetBox);
+      blocks.push(st);
+    }
+    blocks.sort((p, q) => (p.companyBox || p.streetBox).yc - (q.companyBox || q.streetBox).yc);
+    const h = hit.h;
+    blocks.forEach((bk, i) => {
+      const nextTop = blocks[i + 1] ? (blocks[i + 1].companyBox || blocks[i + 1].streetBox).y0 : Infinity;
+      const notes = col.filter((x) => x.color === 'yellow' && x.yc > bk.streetBox.yc && x.y1 <= nextTop + 2 && x.yc < bk.streetBox.yc + h * 6)
+        .sort((p, q) => p.yc - q.yc);
+      bk.notes = notes.map((x) => x.text);
+      bk.bottom = notes.length ? notes[notes.length - 1].y1 : bk.streetBox.y1;
+      bk.top = (bk.companyBox || bk.streetBox).y0;
+      const top = bk.companyBox || bk.streetBox;
+      const lab = segs.find((x) => /^(MON|DEM)$/i.test(x.text) && x.x0 > hit.x1 && x.x1 < top.x0 + 4
+        && x.yc > top.y0 - h * 0.8 && x.yc < bk.streetBox.y1 + h * 0.8);
+      bk.label = lab ? lab.text.toUpperCase() : '';
+      finish(bk);
+    });
+    // bitişik blokları aynı gruba al (aralarında boş satır yoksa)
+    let idx = blocks.findIndex((bk) => bk.streetBox === chosen.streetBox);
+    if (idx < 0) { blocks.push(finish({ ...chosen, notes: [], top: (chosen.companyBox || chosen.streetBox).y0, bottom: chosen.streetBox.y1, label: '' })); idx = blocks.length - 1; }
+    let i0 = idx;
+    let i1 = idx;
+    while (i0 > 0 && blocks[i0].top - blocks[i0 - 1].bottom < h * 1.5) i0--;
+    while (i1 < blocks.length - 1 && blocks[i1 + 1].top - blocks[i1].bottom < h * 1.5) i1++;
+    const list = blocks.slice(i0, i1 + 1);
+    result = { ...list[list.indexOf(blocks[idx])], list };
+    const top = list[0].top - 4;
+    const nextBlock = blocks[i1 + 1];
+    const section = segs.filter((x) => /^(TRANSPORT|AFWEZIGEN)/i.test(x.text) && x.yc > hit.yc).sort((p, q) => p.yc - q.yc)[0];
+    const bottom = Math.min(nextBlock ? nextBlock.top : Infinity, section ? section.y0 : Infinity, hit.y1 + h * 12);
+    mates = segs.filter((x) => x !== hit && Math.abs(x.x0 - hit.x0) < width * 0.05 && x.y0 > top && x.y1 < bottom
+      && /^[A-ZÀ-Ý][a-zà-ÿ]+ [A-ZÀ-Ý]/.test(x.text)).map((x) => x.text);
   }
   return { found: true, nameSeg: hit, nameText: hit.text, result, mates, sites, date: date && date.label, segs };
 }

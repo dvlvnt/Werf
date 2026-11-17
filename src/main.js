@@ -83,10 +83,10 @@ function home() {
       <p>Ekran görüntüsünü seç, ${esc(name)} için adres ve harita linki çıksın.</p>
     </button>
     ${last ? `<section class="last">
-      <div class="last-h">Son adres${last.date ? `, ${esc(last.date)}` : ''}</div>
-      <a class="site" href="${esc(mapsUrl(last.query))}" target="_blank" rel="noopener">
-        <div><b>${esc(last.street)}</b><span>${esc([last.company, last.city].filter(Boolean).join(' · '))}</span></div>${I.arrow}
-      </a>
+      <div class="last-h">Son ${(last.stops || [last]).length > 1 ? 'adresler' : 'adres'}${last.date ? `, ${esc(last.date)}` : ''}</div>
+      ${(last.stops || [last]).map((s) => `<a class="site" href="${esc(mapsUrl(s.query))}" target="_blank" rel="noopener">
+        <div><b>${esc(s.street)}</b><span>${esc([s.company, s.city].filter(Boolean).join(', '))}</span></div>${I.arrow}
+      </a>`).join('')}
     </section>` : ''}`;
   $('pick').addEventListener('click', () => $('file').click());
   if (!reduced) {
@@ -151,8 +151,8 @@ function classify(d) {
     const g = d[i + 1];
     const b = d[i + 2];
     bg++;
-    if (r > 190 && g > 170 && b < 140 && r - b > 90) yellow++;
-    if (Math.min(r, g, b) < 170 && !(b < 140 && r > 190 && g > 170)) { ink++; if (g > r + 30 && g > b + 10) green++; }
+    if ((r > 190 && g > 170 && b < 140 && r - b > 90) || (r < 140 && g > 190 && b > 190)) yellow++;
+    if (Math.min(r, g, b) < 170 && !(b < 140 && r > 190 && g > 170) && !(r < 140 && g > 190 && b > 190)) { ink++; if (g > r + 30 && g > b + 10) green++; }
   }
   if (bg && yellow / bg > 0.3) return 'yellow';
   if (ink && green / ink > 0.4) return 'green';
@@ -296,27 +296,40 @@ function show() {
     return;
   }
 
-  const res = r.result;
-  const addrBox = union(res.streetBox, res.companyBox);
+  const list = (r.result.list && r.result.list.length ? r.result.list : [r.result]);
   const n = boxPad(r.nameSeg);
-  const a = boxPad(addrBox);
+  const boxes = list.map((s) => boxPad(union(s.streetBox, s.companyBox)));
   const sx = n.x + n.w;
   const sy = n.y + n.h / 2;
-  const ex = a.x;
-  const ey = a.y + a.h / 2;
-  const mx = (sx + ex) / 2;
-  const route = `M${sx} ${sy} C${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`;
+  const routes = boxes.map((a) => {
+    const ex = a.x;
+    const ey = a.y + a.h / 2;
+    const mx = (sx + ex) / 2;
+    return `M${sx} ${sy} C${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`;
+  });
   sheet.insertAdjacentHTML('beforeend', `
     <svg class="overlay" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-      <path class="route" id="route" d="${route}"/>
+      ${routes.map((d) => `<path class="route" d="${d}"/>`).join('')}
     </svg>
     <div class="hl" id="hlName" style="${pct(n, W, H)}"></div>
-    <div class="hl" id="hlAddr" style="${pct(a, W, H)}"></div>`);
+    ${boxes.map((a) => `<div class="hl hl-addr" style="${pct(a, W, H)}"></div>`).join('')}`);
 
-  const query = res.query;
-  const plainNoMap = res.plain && !/\d/.test(res.street);
-  last = { date: r.date, company: res.company, street: res.street, city: res.city, query, name, ts: Date.now() };
-  ls.set('werf.last', last);
+  const stops = list.map((s) => ({ ...s, q: s.query }));
+  const hasMap = (s) => !(s.plain && !/\d/.test(s.street));
+  const LABEL = { MON: 'Kurulum (MON)', DEM: 'Söküm (DEM)' };
+  const multi = stops.length > 1;
+  const routeUrl = () => {
+    const qs = stops.filter(hasMap).map((s) => s.q);
+    if (qs.length < 2) return null;
+    const dest = qs[qs.length - 1];
+    const way = qs.slice(0, -1).join('|');
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&waypoints=${encodeURIComponent(way)}&travelmode=driving`;
+  };
+  const save = () => {
+    last = { date: r.date, stops: stops.map((s) => ({ company: s.company, street: s.street, city: s.city, query: s.q, label: s.label })), name, ts: Date.now() };
+    ls.set('werf.last', last);
+  };
+  save();
 
   out.innerHTML = `
     <article class="card" id="card">
@@ -324,46 +337,55 @@ function show() {
         <div class="pin-wrap"><span class="ring" id="ring"></span><span class="pin" id="pin" style="color:var(--orange)">${I.pin(34)}</span></div>
         <div>
           ${r.date ? `<span class="date">${esc(r.date)}</span>` : ''}
-          ${res.company ? `<div class="company">${esc(res.company)}</div>` : ''}
-          <div class="street" id="street">${esc(res.street)}</div>
-          ${res.city ? `<div class="city">${esc(res.city)}</div>` : ''}
+          ${multi ? `<div class="count">${stops.length} adres</div>` : ''}
         </div>
       </div>
-      ${plainNoMap ? '' : `<a class="go" id="go" href="${esc(res.url)}" target="_blank" rel="noopener">${I.pin(22)}Haritada aç</a>`}
+      ${stops.map((s, i) => `
+        <section class="stop" data-i="${i}">
+          ${multi ? `<div class="stop-n">${i + 1}</div>` : ''}
+          <div class="stop-body">
+            ${s.label ? `<div class="kind">${esc(LABEL[s.label] || s.label)}</div>` : ''}
+            ${s.company ? `<div class="company">${esc(s.company)}</div>` : ''}
+            <div class="street">${esc(s.street)}</div>
+            ${s.city ? `<div class="city">${esc(s.city)}</div>` : ''}
+            ${s.notes && s.notes.length ? `<div class="notes">${s.notes.map((x) => `<span class="note">${esc(x)}</span>`).join('')}</div>` : ''}
+            ${hasMap(s) ? `<a class="go ${multi ? 'small' : ''}" data-go="${i}" href="${esc(mapsUrl(s.q))}" target="_blank" rel="noopener">${I.pin(20)}Haritada aç</a>` : ''}
+            <div class="edit"><input data-q="${i}" value="${esc(s.q)}" aria-label="Harita araması" /><small>Okuma hatalıysa buradan düzelt, link hemen güncellenir.</small></div>
+          </div>
+        </section>`).join('')}
+      ${multi && routeUrl() ? `<a class="go route-btn" id="routeBtn" href="${esc(routeUrl())}" target="_blank" rel="noopener">${I.arrow}Rotayı aç (${stops.filter(hasMap).length} durak)</a>` : ''}
       <div class="row2">
         <button class="sec" id="copy">Kopyala</button>
         <button class="sec" id="share">Paylaş</button>
         <button class="sec" id="fix" aria-pressed="false">Düzelt</button>
       </div>
-      <div class="edit" id="edit">
-        <input id="q" value="${esc(query)}" aria-label="Harita araması" />
-        <small>Okuma hatalıysa adresi buradan düzelt, link hemen güncellenir.</small>
-      </div>
-      <div class="meta">
-        ${r.mates.length ? `<div><div class="lbl">Ekipte</div><div class="val">${r.mates.map(esc).join(', ')}</div></div>` : ''}
-        ${res.notes && res.notes.length ? `<div><div class="lbl">Not</div><div class="val">${res.notes.map((x) => `<span class="note">${esc(x)}</span>`).join('')}</div></div>` : ''}
-      </div>
+      ${r.mates.length ? `<div class="meta"><div><div class="lbl">Ekipte</div><div class="val">${r.mates.map(esc).join(', ')}</div></div></div>` : ''}
     </article>
     ${sitesHTML}
     <button class="again" id="again">Yeni liste yükle</button>`;
 
-  const linkNow = () => mapsUrl($('q').value.trim() || query);
-  $('q').addEventListener('input', () => {
-    const go = $('go');
-    if (go) go.href = linkNow();
-    last.query = $('q').value.trim() || query;
-    ls.set('werf.last', last);
-  });
+  const allText = () => stops.map((s, i) => `${multi ? `${i + 1}. ` : ''}${s.company ? `${s.company}\n` : ''}${s.q}${hasMap(s) ? `\n${mapsUrl(s.q)}` : ''}`).join('\n\n')
+    + (multi && routeUrl() ? `\n\nRota: ${routeUrl()}` : '');
+  out.querySelectorAll('[data-q]').forEach((inp) => inp.addEventListener('input', () => {
+    const i = +inp.dataset.q;
+    stops[i].q = inp.value.trim() || list[i].query;
+    const go = out.querySelector(`[data-go="${i}"]`);
+    if (go) go.href = mapsUrl(stops[i].q);
+    const rb = $('routeBtn');
+    if (rb && routeUrl()) rb.href = routeUrl();
+    save();
+  }));
   $('fix').addEventListener('click', () => {
-    const on = $('edit').classList.toggle('on');
+    const on = !out.querySelector('.edit.on');
+    out.querySelectorAll('.edit').forEach((e) => e.classList.toggle('on', on));
     $('fix').setAttribute('aria-pressed', on);
-    if (on) $('q').focus();
+    if (on) out.querySelector('[data-q]').focus();
   });
   $('copy').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(linkNow()); toast('Link kopyalandı'); } catch { toast('Kopyalanamadı'); }
+    try { await navigator.clipboard.writeText(allText()); toast(multi ? 'Adresler kopyalandı' : 'Link kopyalandı'); } catch { toast('Kopyalanamadı'); }
   });
   $('share').addEventListener('click', async () => {
-    const text = `${res.company ? `${res.company}\n` : ''}${$('q').value.trim() || query}\n${linkNow()}`;
+    const text = allText();
     try {
       if (Capacitor.isNativePlatform()) await Share.share({ title: 'Adres', text });
       else if (navigator.share) await navigator.share({ text });
@@ -372,48 +394,55 @@ function show() {
   });
   $('again').addEventListener('click', () => $('file').click());
 
-  choreograph(n, a);
+  choreograph(n, boxes);
 }
 
-async function choreograph(n, a) {
+async function choreograph(n, boxes) {
   const scroller = $('scroller');
   const sheet = $('sheetImg');
   const scale = sheet.offsetWidth / current.W;
-  const target = Math.max(0, ((n.y + a.y) / 2) * scale - scroller.offsetHeight / 2 + 20);
+  const ys = [n.y, ...boxes.map((b) => b.y)];
+  const target = Math.max(0, ((Math.min(...ys) + Math.max(...ys)) / 2) * scale - scroller.offsetHeight / 2 + 20);
   const hlN = $('hlName');
-  const hlA = $('hlAddr');
-  const route = $('route');
+  const hlA = [...sheet.querySelectorAll('.hl-addr')];
+  const routes = [...sheet.querySelectorAll('.route')];
   if (reduced) {
     scroller.scrollTop = target;
-    [hlN, hlA].forEach((x) => { x.style.opacity = 1; });
-    route.style.display = 'none';
+    [hlN, ...hlA].forEach((x) => { x.style.opacity = 1; });
+    routes.forEach((x) => { x.style.display = 'none'; });
     $('dim').style.opacity = 1;
     return;
   }
-  const len = route.getTotalLength();
-  route.style.strokeWidth = `${3 / scale}`;
-  route.style.strokeDasharray = `${len}`;
-  route.style.strokeDashoffset = `${len}`;
+  const lens = routes.map((rt) => {
+    const len = rt.getTotalLength();
+    rt.style.strokeWidth = `${3 / scale}`;
+    rt.style.strokeDasharray = `${len}`;
+    rt.style.strokeDashoffset = `${len}`;
+    return len;
+  });
   $('card').style.opacity = 0;
 
   await animate(scroller.scrollTop, target, { duration: 0.9, ease: [0.65, 0, 0.35, 1], onUpdate: (v) => { scroller.scrollTop = v; } });
   animate('#dim', { opacity: 1 }, { duration: 0.4 });
   buzz(12);
   await animate(hlN, { opacity: [0, 1], scale: [1.6, 1] }, { type: 'spring', stiffness: 380, damping: 22 });
-  await animate(len, 0, { duration: 0.55, ease: 'easeInOut', onUpdate: (v) => { route.style.strokeDashoffset = `${v}`; } });
-  buzz(12);
-  animate(hlA, { opacity: [0, 1], scale: [1.4, 1] }, { type: 'spring', stiffness: 380, damping: 22 });
-  await new Promise((r) => setTimeout(r, 220));
+  for (let i = 0; i < routes.length; i++) {
+    const rt = routes[i];
+    await animate(lens[i], 0, { duration: 0.5, ease: 'easeInOut', onUpdate: (v) => { rt.style.strokeDashoffset = `${v}`; } });
+    buzz(12);
+    animate(hlA[i], { opacity: [0, 1], scale: [1.4, 1] }, { type: 'spring', stiffness: 380, damping: 22 });
+  }
+  await new Promise((res) => setTimeout(res, 220));
 
   const card = $('card');
   card.style.opacity = '';
   animate(card, { y: [80, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 210, damping: 24 });
-  animate('#street', { clipPath: ['inset(0 100% 0 0)', 'inset(0 0% 0 0)'] }, { duration: 0.5, delay: 0.2, ease: 'easeOut' });
+  animate('.stop', { opacity: [0, 1], x: [-18, 0] }, { delay: (i) => 0.2 + i * 0.12, duration: 0.4 });
+  animate('.street', { clipPath: ['inset(0 100% 0 0)', 'inset(0 0% 0 0)'] }, { duration: 0.5, delay: 0.25, ease: 'easeOut' });
   await animate('#pin', { y: [-90, 0], scaleY: [1.2, 1] }, { type: 'spring', stiffness: 520, damping: 13, delay: 0.15 });
   buzz([20, 30, 10]);
   animate('#ring', { opacity: [0.9, 0], scale: [0.4, 2.4] }, { duration: 0.7, ease: 'easeOut' });
-  const go = $('go');
-  if (go) animate(go, { scale: [1, 1.04, 1] }, { duration: 0.5, delay: 0.25 });
+  animate('.go', { scale: [1, 1.04, 1] }, { duration: 0.5, delay: 0.25 });
   animate('.sites, .again', { opacity: [0, 1], y: [16, 0] }, { duration: 0.4, delay: 0.3 });
 }
 
