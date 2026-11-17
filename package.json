@@ -1,0 +1,22 @@
+{
+  "name": "werf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "node scripts/copy-ocr.mjs && vite build" },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/share": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.1",
+    "@fontsource-variable/archivo": "*",
+    "@tesseract.js-data/eng": "*",
+    "motion": "^11.11.0",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.1.2",
+    "vite": "^5.4.0"
+  }
+}

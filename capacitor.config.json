@@ -1,0 +1,6 @@
+{
+  "appId": "com.dvlvnt.werf",
+  "appName": "Werf",
+  "webDir": "dist",
+  "backgroundColor": "#1C1F22"
+}
