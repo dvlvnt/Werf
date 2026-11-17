@@ -16,7 +16,6 @@ const ls = {
 };
 
 let name = ls.get('werf.name', 'Levent');
-let last = ls.get('werf.last', null);
 let current = null; // { url, words, W, H, colorOf }
 
 /* ---------- ikonlar ---------- */
@@ -55,7 +54,7 @@ document.body.insertAdjacentHTML('afterbegin', topo());
 const app = document.getElementById('app');
 app.innerHTML = `
   <header class="top">
-    <div class="mark">${I.logo}Werf</div>
+    <button class="mark" id="homeBtn" aria-label="Ana ekran">${I.logo}<span class="word">Werf</span></button>
     <button class="who" id="who" aria-label="Aranacak isim">${I.edit}<span id="whoName"></span></button>
   </header>
   <main id="view"></main>
@@ -63,6 +62,7 @@ app.innerHTML = `
   <div class="toast" id="toast" role="status"></div>
 `;
 const $ = (id) => document.getElementById(id);
+$('homeBtn').addEventListener('click', () => { current = null; home(); window.scrollTo(0, 0); });
 const renderWho = () => { $('whoName').textContent = name; };
 renderWho();
 
@@ -74,7 +74,93 @@ function toast(msg) {
   toast.t = setTimeout(() => animate(t, { opacity: 0 }, { duration: 0.3 }), 1600);
 }
 
+/* ---------- geçmiş ---------- */
+const DAY_TR = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+const MON_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+function dateOf(entry) {
+  const m = entry.date && entry.date.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (m) {
+    const y = +m[3] < 100 ? 2000 + +m[3] : +m[3];
+    return new Date(y, +m[2] - 1, +m[1], 12);
+  }
+  return new Date(entry.ts || Date.now());
+}
+const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+function dayTitle(d) {
+  const today = new Date();
+  const tom = new Date(); tom.setDate(today.getDate() + 1);
+  const yes = new Date(); yes.setDate(today.getDate() - 1);
+  const base = `${d.getDate()} ${MON_TR[d.getMonth()]}`;
+  if (dayKey(d) === dayKey(today)) return { main: 'Bugün', sub: `${DAY_TR[d.getDay()]}, ${base}` };
+  if (dayKey(d) === dayKey(tom)) return { main: 'Yarın', sub: `${DAY_TR[d.getDay()]}, ${base}` };
+  if (dayKey(d) === dayKey(yes)) return { main: 'Dün', sub: `${DAY_TR[d.getDay()]}, ${base}` };
+  return { main: DAY_TR[d.getDay()], sub: `${base} ${d.getFullYear()}` };
+}
+
+let history = ls.get('werf.history', null);
+if (!history) {
+  const old = ls.get('werf.last', null);
+  history = old ? [{ date: old.date, stops: old.stops || [{ company: old.company, street: old.street, city: old.city, query: old.query, label: '' }], ts: old.ts || Date.now() }] : [];
+  ls.set('werf.history', history);
+}
+function remember(entry) {
+  const k = dayKey(dateOf(entry));
+  history = history.filter((h) => dayKey(dateOf(h)) !== k);
+  history.push(entry);
+  history.sort((a, b) => dateOf(b) - dateOf(a) || b.ts - a.ts);
+  history = history.slice(0, 120);
+  ls.set('werf.history', history);
+}
+
+function historyHTML() {
+  if (!history.length) return '';
+  return `<section class="hist" id="hist">
+    <h3>Geçmiş</h3>
+    ${history.map((h, i) => {
+      const t = dayTitle(dateOf(h));
+      const open = i === 0;
+      return `<div class="day ${open ? 'open' : ''}">
+        <button class="day-h" data-day="${i}" aria-expanded="${open}">
+          <span class="day-t"><b>${esc(t.main)}</b><span>${esc(t.sub)}</span></span>
+          <span class="day-c">${h.stops.length}</span>
+          <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="day-b"><div class="day-in">
+          ${h.stops.map((s, j) => `<a class="site" href="${esc(mapsUrl(s.query))}" target="_blank" rel="noopener">
+            <div>${h.stops.length > 1 ? `<i class="mini-n">${j + 1}</i>` : ''}<b>${esc(s.street)}</b><span>${esc(s.company && s.city && s.company.endsWith(s.city) ? s.company : [s.company, s.city].filter(Boolean).join(', '))}</span></div>${I.arrow}
+          </a>`).join('')}
+        </div></div>
+      </div>`;
+    }).join('')}
+  </section>`;
+}
+
+function bindHistory() {
+  const hist = $('hist');
+  if (!hist) return;
+  hist.addEventListener('click', (e) => {
+    const b = e.target.closest('.day-h');
+    if (!b) return;
+    const day = b.parentElement;
+    const body = day.querySelector('.day-b');
+    const open = !day.classList.contains('open');
+    day.classList.toggle('open', open);
+    b.setAttribute('aria-expanded', open);
+    const h = body.firstElementChild.offsetHeight;
+    if (reduced) { body.style.height = open ? 'auto' : '0px'; return; }
+    animate(body, { height: open ? [0, h] : [h, 0] }, { type: 'spring', stiffness: 300, damping: 32 }).then(() => { body.style.height = open ? 'auto' : '0px'; });
+    animate(b.querySelector('.chev'), { rotate: open ? 180 : 0 }, { duration: 0.25 });
+    if (open) animate(day.querySelectorAll('.site'), { opacity: [0, 1], x: [-12, 0] }, { delay: (i) => i * 0.06, duration: 0.3 });
+  });
+  hist.querySelectorAll('.day').forEach((d) => {
+    const body = d.querySelector('.day-b');
+    body.style.height = d.classList.contains('open') ? 'auto' : '0px';
+    if (d.classList.contains('open')) d.querySelector('.chev').style.transform = 'rotate(180deg)';
+  });
+}
+
 /* ---------- ana ekran ---------- */
+let introDone = false;
 function home() {
   $('view').innerHTML = `
     <button class="drop" id="pick">
@@ -82,16 +168,71 @@ function home() {
       <h1>Günlük listeyi yükle</h1>
       <p>Ekran görüntüsünü seç, ${esc(name)} için adres ve harita linki çıksın.</p>
     </button>
-    ${last ? `<section class="last">
-      <div class="last-h">Son ${(last.stops || [last]).length > 1 ? 'adresler' : 'adres'}${last.date ? `, ${esc(last.date)}` : ''}</div>
-      ${(last.stops || [last]).map((s) => `<a class="site" href="${esc(mapsUrl(s.query))}" target="_blank" rel="noopener">
-        <div><b>${esc(s.street)}</b><span>${esc([s.company, s.city].filter(Boolean).join(', '))}</span></div>${I.arrow}
-      </a>`).join('')}
-    </section>` : ''}`;
+    ${historyHTML()}`;
   $('pick').addEventListener('click', () => $('file').click());
-  if (!reduced) {
-    animate('.drop .ico', { y: [-30, 0], rotate: [-12, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
-    animate('.drop h1, .drop p, .last', { opacity: [0, 1], y: [14, 0] }, { delay: 0.12, duration: 0.4 });
+  bindHistory();
+  if (reduced) return;
+  if (!introDone) { introDone = true; intro(); return; }
+  animate('.drop .ico', { y: [-30, 0], rotate: [-12, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
+  animate('.drop h1, .drop p, .hist', { opacity: [0, 1], y: [14, 0] }, { delay: 0.12, duration: 0.4 });
+}
+
+/* açılış: harita çizgileri çizilir, iğne düşer, rota çizgisi karta iner */
+async function intro() {
+  const topoPaths = [...document.querySelectorAll('.topo path')];
+  topoPaths.forEach((p) => { p.setAttribute('pathLength', '1'); p.style.strokeDasharray = '1'; p.style.strokeDashoffset = '1'; });
+  const hide = ['.who', '.mark .word', '.drop', '.hist'];
+  hide.forEach((s) => document.querySelectorAll(s).forEach((el) => { el.style.opacity = 0; }));
+  const pin = document.querySelector('.mark svg');
+  pin.style.opacity = 0;
+
+  // ortada büyük iğne
+  const stage = document.createElement('div');
+  stage.className = 'intro';
+  stage.innerHTML = `<div class="intro-pin">${I.logo.replace('width="34" height="34"', 'width="120" height="120"')}</div><div class="intro-ring"></div><div class="intro-ring r2"></div>`;
+  document.body.appendChild(stage);
+  const bigPin = stage.querySelector('.intro-pin');
+  const rings = stage.querySelectorAll('.intro-ring');
+
+  const n = topoPaths.length;
+  animate(0, 1, {
+    duration: 1.8,
+    ease: 'easeOut',
+    onUpdate: (v) => topoPaths.forEach((p, i) => {
+      const start = (i / n) * 0.55;
+      const t = Math.min(1, Math.max(0, (v - start) / 0.45));
+      p.style.strokeDashoffset = `${1 - t}`;
+    }),
+  });
+  await animate(bigPin, { y: [-window.innerHeight * 0.6, 0], scaleY: [1.25, 1], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 15, delay: 0.25 });
+  buzz([18, 40, 10]);
+  animate(bigPin, { scaleX: [1.25, 1], scaleY: [0.8, 1] }, { type: 'spring', stiffness: 600, damping: 12 });
+  rings.forEach((r, i) => animate(r, { opacity: [0.9, 0], scale: [0.3, 3.2] }, { duration: 1, delay: i * 0.18, ease: 'easeOut' }));
+  await new Promise((r) => setTimeout(r, 450));
+
+  // iğne logonun yerine uçar
+  const from = bigPin.getBoundingClientRect();
+  const to = pin.getBoundingClientRect();
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+  const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+  const sc = to.width / from.width;
+  await animate(bigPin, { x: [0, dx], y: [0, dy], scale: [1, sc] }, { duration: 0.6, ease: [0.7, 0, 0.2, 1] });
+  pin.style.opacity = 1;
+  stage.remove();
+  animate(pin, { scale: [1.3, 1] }, { type: 'spring', stiffness: 500, damping: 14 });
+
+  const word = document.querySelector('.mark .word');
+  word.style.opacity = 1;
+  animate(word, { clipPath: ['inset(0 100% 0 0)', 'inset(0 0% 0 0)'], x: [-10, 0] }, { duration: 0.5, ease: 'easeOut' });
+  animate('.who', { opacity: [0, 1], x: [20, 0] }, { duration: 0.4, delay: 0.15 });
+  const drop = document.querySelector('.drop');
+  animate(drop, { opacity: [0, 1], y: [40, 0], scale: [0.96, 1] }, { type: 'spring', stiffness: 200, damping: 22, delay: 0.2 });
+  animate('.drop .ico', { scale: [0, 1], rotate: [-25, 0] }, { type: 'spring', stiffness: 320, damping: 13, delay: 0.42 });
+  animate('.drop h1, .drop p', { opacity: [0, 1], y: [12, 0] }, { delay: (i) => 0.5 + i * 0.08, duration: 0.4 });
+  const hist = document.querySelector('.hist');
+  if (hist) {
+    hist.style.opacity = 1;
+    animate(hist.querySelectorAll('h3, .day'), { opacity: [0, 1], y: [18, 0] }, { delay: (i) => 0.65 + i * 0.07, duration: 0.4 });
   }
 }
 
@@ -326,8 +467,7 @@ function show() {
     return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&waypoints=${encodeURIComponent(way)}&travelmode=driving`;
   };
   const save = () => {
-    last = { date: r.date, stops: stops.map((s) => ({ company: s.company, street: s.street, city: s.city, query: s.q, label: s.label })), name, ts: Date.now() };
-    ls.set('werf.last', last);
+    remember({ date: r.date, stops: stops.map((s) => ({ company: s.company, street: s.street, city: s.city, query: s.q, label: s.label })), name, ts: Date.now() });
   };
   save();
 
@@ -362,7 +502,7 @@ function show() {
       ${r.mates.length ? `<div class="meta"><div><div class="lbl">Ekipte</div><div class="val">${r.mates.map(esc).join(', ')}</div></div></div>` : ''}
     </article>
     ${sitesHTML}
-    <button class="again" id="again">Yeni liste yükle</button>`;
+    <div class="row2 end"><button class="again" id="again">Yeni liste yükle</button><button class="again" id="toHist">Geçmiş</button></div>`;
 
   const allText = () => stops.map((s, i) => `${multi ? `${i + 1}. ` : ''}${s.company ? `${s.company}\n` : ''}${s.q}${hasMap(s) ? `\n${mapsUrl(s.q)}` : ''}`).join('\n\n')
     + (multi && routeUrl() ? `\n\nRota: ${routeUrl()}` : '');
@@ -393,6 +533,7 @@ function show() {
     } catch { /* iptal */ }
   });
   $('again').addEventListener('click', () => $('file').click());
+  $('toHist').addEventListener('click', () => { current = null; home(); window.scrollTo(0, 0); });
 
   choreograph(n, boxes);
 }
@@ -443,7 +584,7 @@ async function choreograph(n, boxes) {
   buzz([20, 30, 10]);
   animate('#ring', { opacity: [0.9, 0], scale: [0.4, 2.4] }, { duration: 0.7, ease: 'easeOut' });
   animate('.go', { scale: [1, 1.04, 1] }, { duration: 0.5, delay: 0.25 });
-  animate('.sites, .again', { opacity: [0, 1], y: [16, 0] }, { duration: 0.4, delay: 0.3 });
+  animate('.sites, .row2.end', { opacity: [0, 1], y: [16, 0] }, { duration: 0.4, delay: 0.3 });
 }
 
 /* ---------- isim ---------- */

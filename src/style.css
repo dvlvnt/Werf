@@ -161,7 +161,7 @@ button { background: none; border: 0; cursor: pointer; }
   width: 100%; text-align: left; padding: 14px 16px; margin-bottom: 8px;
   border-radius: 16px; background: var(--graphite-2); text-decoration: none; color: var(--bone);
 }
-.site b { display: block; font-weight: 700; font-stretch: 108%; }
+.site b { font-weight: 700; font-stretch: 108%; }
 .site span { color: var(--mute); font-size: 14px; }
 .site svg { flex: none; color: var(--orange); }
 
@@ -205,3 +205,39 @@ button { background: none; border: 0; cursor: pointer; }
 .notes { margin-top: 8px; }
 .go.small { padding: 13px; font-size: 16px; margin-top: 12px; box-shadow: none; }
 .route-btn { background: var(--graphite); color: var(--bone); box-shadow: none; margin-top: 18px; }
+
+/* geçmiş */
+.hist { margin-top: 26px; }
+.hist h3 { font-size: 14px; color: var(--mute); font-weight: 600; margin-bottom: 10px; }
+.day { margin-bottom: 8px; border-radius: 18px; background: var(--graphite-2); overflow: hidden; }
+.day.open { background: #2B3035; }
+.day-h { display: flex; align-items: center; gap: 12px; width: 100%; padding: 15px 16px; text-align: left; }
+.day-t { flex: 1; min-width: 0; }
+.day-t b { display: block; font-weight: 800; font-stretch: 110%; font-size: 18px; }
+.day-t span { color: var(--mute); font-size: 14px; }
+.day-c {
+  min-width: 28px; height: 28px; padding: 0 8px; border-radius: 14px; background: var(--orange); color: #fff;
+  display: grid; place-items: center; font-weight: 800; font-size: 14px;
+}
+.chev { color: var(--mute); flex: none; }
+.day-b { overflow: hidden; }
+.day-in { padding: 0 10px 10px; }
+.day-in .site { background: var(--graphite); margin-bottom: 6px; }
+.mini-n {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; margin-right: 8px;
+  background: var(--orange); color: #fff; font-style: normal; font-size: 12px; font-weight: 800; vertical-align: 2px;
+}
+.site b { display: inline; }
+.site div > span { display: block; }
+.mark .word { display: inline-block; }
+
+/* açılış */
+.intro { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; pointer-events: none; }
+.intro-pin { position: relative; z-index: 2; filter: drop-shadow(0 18px 30px rgba(255, 106, 19, .35)); }
+.intro-ring {
+  position: absolute; left: 50%; top: 50%; width: 120px; height: 40px; margin: 52px 0 0 -60px; border-radius: 50%;
+  border: 3px solid var(--orange); opacity: 0;
+}
+.row2.end { margin-top: 16px; }
+.row2.end .again { margin-top: 0; }
+.mark { color: inherit; padding: 0; }
