@@ -34,6 +34,11 @@ jobs:
           npx capacitor-assets generate --android
           npx cap sync android
 
+      - name: Sabit imza anahtarını kullan
+        run: |
+          mkdir -p ~/.android
+          cp keystore/debug.keystore ~/.android/debug.keystore
+
       - name: APK derle
         working-directory: android
         run: ./gradlew assembleDebug
