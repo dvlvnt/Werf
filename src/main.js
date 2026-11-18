@@ -15,6 +15,7 @@ const ls = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* dolu */ } },
 };
 
+const askName = ls.get('werf.name', null) === null;
 let name = ls.get('werf.name', 'Levent');
 let current = null; // { url, words, W, H, colorOf }
 
@@ -175,7 +176,7 @@ function home() {
     ${historyHTML()}`;
   $('pick').addEventListener('click', () => $('file').click());
   bindHistory();
-  if (reduced) { if (!introDone) { introDone = true; setTimeout(() => openNameSheet(true), 100); } return; }
+  if (reduced) { if (!introDone) { introDone = true; if (askName) setTimeout(() => openNameSheet(true), 100); } return; }
   if (!introDone) {
     introDone = true;
     const reveal = () => {
@@ -184,7 +185,7 @@ function home() {
       document.querySelectorAll('.topo path').forEach((p) => { p.style.strokeDashoffset = '0'; });
     };
     const guard = setTimeout(reveal, 4000);
-    intro().catch(reveal).finally(() => { clearTimeout(guard); setTimeout(() => openNameSheet(true), 250); });
+    intro().catch(reveal).finally(() => { clearTimeout(guard); if (askName) setTimeout(() => openNameSheet(true), 250); });
     return;
   }
   animate('.drop .ico', { y: [-30, 0], rotate: [-12, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
@@ -260,11 +261,14 @@ const STAGES = {
   'initialized api': 'Hazır',
   'recognizing text': 'Yazılar çözülüyor',
 };
-function getWorker() {
+// Telefonun çekirdek sayısına göre 1-3 okuyucu paralel çalışır
+const POOL = Math.min(3, Math.max(1, Math.floor((navigator.hardwareConcurrency || 2) / 2)));
+const prog = {};
+function getWorkers() {
   if (!workerP) {
     workerP = import('tesseract.js').then(({ createWorker }) => {
       const base = new URL('ocr/', location.href).href;
-      return createWorker('eng', 1, {
+      const make = (k) => createWorker('eng', 1, {
         workerPath: `${base}worker.min.js`,
         corePath: base,
         langPath: base.replace(/\/$/, ''),
@@ -274,17 +278,55 @@ function getWorker() {
         logger: (m) => {
           lastStage = m.status;
           onStage(STAGES[m.status] || m.status);
-          if (m.status === 'recognizing text') onProgress(0.25 + m.progress * 0.75); else if (m.progress) onProgress(m.progress * 0.25);
+          if (m.status === 'recognizing text') {
+            prog[k] = m.progress;
+            const vals = Object.values(prog);
+            onProgress(0.15 + (vals.reduce((x, y) => x + y, 0) / Math.max(1, vals.length)) * 0.85);
+          }
         },
         errorHandler: (e) => { lastStage = `hata: ${e}`; },
       }).then(async (w) => {
         await w.setParameters({ tessedit_pageseg_mode: '11', preserve_interword_spaces: '1' });
         return w;
       });
+      return Promise.all(Array.from({ length: POOL }, (_, k) => make(k)));
     });
     workerP.catch(() => { workerP = null; });
   }
   return workerP;
+}
+
+// Boş kenarları kırp, resmi boş satırlardan parçalara böl
+function plan(clean, W, H, parts) {
+  let x0 = W;
+  let x1 = 0;
+  let y0 = H;
+  let y1 = 0;
+  const blank = new Uint8Array(H);
+  for (let y = 0; y < H; y++) {
+    let any = false;
+    const row = y * W;
+    for (let x = 0; x < W; x++) {
+      if (clean[row + x] < 200) { any = true; if (x < x0) x0 = x; if (x > x1) x1 = x; }
+    }
+    if (any) { if (y < y0) y0 = y; y1 = y; } else blank[y] = 1;
+  }
+  if (y1 <= y0) return [{ x: 0, y: 0, w: W, h: H }];
+  x0 = Math.max(0, x0 - 6); x1 = Math.min(W - 1, x1 + 6); y0 = Math.max(0, y0 - 6); y1 = Math.min(H - 1, y1 + 6);
+  const cuts = [y0];
+  for (let k = 1; k < parts; k++) {
+    const target = y0 + Math.round(((y1 - y0) * k) / parts);
+    let best = -1;
+    for (let d = 0; d < (y1 - y0) / (parts * 2); d++) {
+      if (blank[target + d]) { best = target + d; break; }
+      if (blank[target - d]) { best = target - d; break; }
+    }
+    if (best > cuts[cuts.length - 1] + 20) cuts.push(best);
+  }
+  cuts.push(y1 + 1);
+  const out = [];
+  for (let k = 0; k < cuts.length - 1; k++) out.push({ x: x0, y: cuts[k], w: x1 - x0 + 1, h: cuts[k + 1] - cuts[k] });
+  return out;
 }
 
 function loadImg(url) {
@@ -340,7 +382,7 @@ async function prepare(img) {
     const h = Math.max(1, Math.ceil((seg.y1 - seg.y0) / 2) + 4);
     return classify(ctx.getImageData(x0, y0, Math.min(w, W - x0), Math.min(h, H - y0)).data);
   };
-  return { canvas: big, W: W * 2, H: H * 2, colorOf };
+  return { canvas: big, W: W * 2, H: H * 2, colorOf, clean, w1: W, h1: H };
 }
 
 /* ---------- işlem akışı ---------- */
@@ -384,12 +426,28 @@ async function run(file) {
     const img = await loadImg(url);
     const prep = await prepare(img);
     onStage('Okuma motoru yükleniyor');
-    const worker = await Promise.race([getWorker(), stall]);
+    const workers = await Promise.race([getWorkers(), stall]);
     onStage('Yazılar çözülüyor');
-    const { data } = await Promise.race([worker.recognize(prep.canvas, {}, { blocks: true }), stall]);
+    Object.keys(prog).forEach((k) => delete prog[k]);
+    const pieces = plan(prep.clean, prep.w1, prep.h1, workers.length).map((r) => {
+      const c = document.createElement('canvas');
+      c.width = r.w * 2; c.height = r.h * 2;
+      c.getContext('2d').drawImage(prep.canvas, r.x * 2, r.y * 2, r.w * 2, r.h * 2, 0, 0, r.w * 2, r.h * 2);
+      return { r, c };
+    });
+    const results = await Promise.race([
+      Promise.all(pieces.map((pc, k) => workers[k % workers.length].recognize(pc.c, {}, { blocks: true }))),
+      stall,
+    ]);
     clearInterval(watch);
     const words = [];
-    for (const b of data.blocks || []) for (const p of b.paragraphs) for (const l of p.lines) for (const w of l.words) words.push({ t: w.text, ...w.bbox });
+    results.forEach(({ data }, k) => {
+      const ox = pieces[k].r.x * 2;
+      const oy = pieces[k].r.y * 2;
+      for (const b of data.blocks || []) for (const p of b.paragraphs) for (const l of p.lines) for (const w of l.words) {
+        words.push({ t: w.text, x0: w.bbox.x0 + ox, x1: w.bbox.x1 + ox, y0: w.bbox.y0 + oy, y1: w.bbox.y1 + oy });
+      }
+    });
     current = { url, words, W: prep.W, H: prep.H, colorOf: prep.colorOf };
     if (scanAnim) scanAnim.stop();
     await Promise.all([
@@ -641,3 +699,5 @@ if (Capacitor.isNativePlatform()) {
   StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
 }
 home();
+// okuma motorunu önceden hazırla, liste seçilince beklemesin
+setTimeout(() => { getWorkers().catch(() => {}); }, 2600);
