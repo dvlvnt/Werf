@@ -250,7 +250,7 @@ button { background: none; border: 0; cursor: pointer; }
 
 .lang-tag { font-size: 12px; font-weight: 800; padding: 3px 7px; border-radius: 7px; background: var(--steel); color: var(--bone); letter-spacing: .02em; flex: none; }
 .sheet .lab { margin-top: 16px; font-size: 13px; font-weight: 700; color: #6B7177; }
-.langs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+.langs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
 .lang { padding: 13px 6px; border-radius: 14px; background: #DDD9D0; font-weight: 700; font-size: 15px; color: var(--graphite); }
 .lang.on { background: var(--graphite); color: var(--bone); }
 .sheet input { margin-top: 8px; }
