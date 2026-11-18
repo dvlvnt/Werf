@@ -62,6 +62,10 @@ app.innerHTML = `
   <div class="toast" id="toast" role="status"></div>
 `;
 const $ = (id) => document.getElementById(id);
+// Android'de Google Haritalar uygulamasını doğrudan arama ile açar (geo: bağlantısı)
+const NATIVE = Capacitor.isNativePlatform();
+const mapHref = (q) => (NATIVE ? `geo:0,0?q=${encodeURIComponent(q)}` : mapsUrl(q));
+const routeHref = (qs) => `https://www.google.com/maps/dir//${qs.map((q) => encodeURIComponent(q)).join('/')}`;
 $('homeBtn').addEventListener('click', () => { current = null; home(); window.scrollTo(0, 0); });
 const renderWho = () => { $('whoName').textContent = name; };
 renderWho();
@@ -126,7 +130,7 @@ function historyHTML() {
           <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="day-b"><div class="day-in">
-          ${h.stops.map((s, j) => `<a class="site" href="${esc(mapsUrl(s.query))}" target="_blank" rel="noopener">
+          ${h.stops.map((s, j) => `<a class="site" href="${esc(mapHref(s.query))}" target="_blank" rel="noopener">
             <div>${h.stops.length > 1 ? `<i class="mini-n">${j + 1}</i>` : ''}<b>${esc(s.street)}</b><span>${esc(s.company && s.city && s.company.endsWith(s.city) ? s.company : [s.company, s.city].filter(Boolean).join(', '))}</span></div>${I.arrow}
           </a>`).join('')}
         </div></div>
@@ -172,7 +176,17 @@ function home() {
   $('pick').addEventListener('click', () => $('file').click());
   bindHistory();
   if (reduced) return;
-  if (!introDone) { introDone = true; intro(); return; }
+  if (!introDone) {
+    introDone = true;
+    const reveal = () => {
+      document.querySelectorAll('.intro').forEach((x) => x.remove());
+      document.querySelectorAll('.who, .mark .word, .mark svg, .drop, .hist, .drop .ico, .drop h1, .drop p').forEach((el) => { el.style.opacity = ''; });
+      document.querySelectorAll('.topo path').forEach((p) => { p.style.strokeDashoffset = '0'; });
+    };
+    const guard = setTimeout(reveal, 4000);
+    intro().catch(reveal).finally(() => clearTimeout(guard));
+    return;
+  }
   animate('.drop .ico', { y: [-30, 0], rotate: [-12, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
   animate('.drop h1, .drop p, .hist', { opacity: [0, 1], y: [14, 0] }, { delay: 0.12, duration: 0.4 });
 }
@@ -195,15 +209,10 @@ async function intro() {
   const rings = stage.querySelectorAll('.intro-ring');
 
   const n = topoPaths.length;
-  animate(0, 1, {
-    duration: 1.8,
-    ease: 'easeOut',
-    onUpdate: (v) => topoPaths.forEach((p, i) => {
-      const start = (i / n) * 0.55;
-      const t = Math.min(1, Math.max(0, (v - start) / 0.45));
-      p.style.strokeDashoffset = `${1 - t}`;
-    }),
-  });
+  requestAnimationFrame(() => requestAnimationFrame(() => topoPaths.forEach((p, i) => {
+    p.style.transition = `stroke-dashoffset 1.1s ease-out ${(i / n) * 0.9}s`;
+    p.style.strokeDashoffset = '0';
+  })));
   await animate(bigPin, { y: [-window.innerHeight * 0.6, 0], scaleY: [1.25, 1], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 15, delay: 0.25 });
   buzz([18, 40, 10]);
   animate(bigPin, { scaleX: [1.25, 1], scaleY: [0.8, 1] }, { type: 'spring', stiffness: 600, damping: 12 });
@@ -420,7 +429,7 @@ function show() {
   const sitesHTML = r.sites.length ? `
     <section class="sites">
       <h3>Listedeki şantiyeler</h3>
-      ${r.sites.map((s) => `<a class="site" href="${esc(s.url)}" target="_blank" rel="noopener"><div><b>${esc(s.street)}</b><span>${esc(s.company)}</span></div>${I.arrow}</a>`).join('')}
+      ${r.sites.map((s) => `<a class="site" href="${esc(mapHref(s.query))}" target="_blank" rel="noopener"><div><b>${esc(s.street)}</b><span>${esc(s.company)}</span></div>${I.arrow}</a>`).join('')}
     </section>` : '';
 
   if (!r.found || !r.result) {
@@ -462,9 +471,7 @@ function show() {
   const routeUrl = () => {
     const qs = stops.filter(hasMap).map((s) => s.q);
     if (qs.length < 2) return null;
-    const dest = qs[qs.length - 1];
-    const way = qs.slice(0, -1).join('|');
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&waypoints=${encodeURIComponent(way)}&travelmode=driving`;
+    return routeHref(qs);
   };
   const save = () => {
     remember({ date: r.date, stops: stops.map((s) => ({ company: s.company, street: s.street, city: s.city, query: s.q, label: s.label })), name, ts: Date.now() });
@@ -489,7 +496,7 @@ function show() {
             <div class="street">${esc(s.street)}</div>
             ${s.city ? `<div class="city">${esc(s.city)}</div>` : ''}
             ${s.notes && s.notes.length ? `<div class="notes">${s.notes.map((x) => `<span class="note">${esc(x)}</span>`).join('')}</div>` : ''}
-            ${hasMap(s) ? `<a class="go ${multi ? 'small' : ''}" data-go="${i}" href="${esc(mapsUrl(s.q))}" target="_blank" rel="noopener">${I.pin(20)}Haritada aç</a>` : ''}
+            ${hasMap(s) ? `<a class="go ${multi ? 'small' : ''}" data-go="${i}" href="${esc(mapHref(s.q))}" target="_blank" rel="noopener">${I.pin(20)}Haritada aç</a>` : ''}
             <div class="edit"><input data-q="${i}" value="${esc(s.q)}" aria-label="Harita araması" /><small>Okuma hatalıysa buradan düzelt, link hemen güncellenir.</small></div>
           </div>
         </section>`).join('')}
@@ -510,7 +517,7 @@ function show() {
     const i = +inp.dataset.q;
     stops[i].q = inp.value.trim() || list[i].query;
     const go = out.querySelector(`[data-go="${i}"]`);
-    if (go) go.href = mapsUrl(stops[i].q);
+    if (go) go.href = mapHref(stops[i].q);
     const rb = $('routeBtn');
     if (rb && routeUrl()) rb.href = routeUrl();
     save();
