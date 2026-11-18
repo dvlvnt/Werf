@@ -101,26 +101,26 @@ function dayTitle(d) {
   return { main: DAY_TR[d.getDay()], sub: `${base} ${d.getFullYear()}` };
 }
 
-let history = ls.get('werf.history', null);
-if (!history) {
+let days = ls.get('werf.history', null);
+if (!days) {
   const old = ls.get('werf.last', null);
-  history = old ? [{ date: old.date, stops: old.stops || [{ company: old.company, street: old.street, city: old.city, query: old.query, label: '' }], ts: old.ts || Date.now() }] : [];
-  ls.set('werf.history', history);
+  days = old ? [{ date: old.date, stops: old.stops || [{ company: old.company, street: old.street, city: old.city, query: old.query, label: '' }], ts: old.ts || Date.now() }] : [];
+  ls.set('werf.history', days);
 }
 function remember(entry) {
   const k = dayKey(dateOf(entry));
-  history = history.filter((h) => dayKey(dateOf(h)) !== k);
-  history.push(entry);
-  history.sort((a, b) => dateOf(b) - dateOf(a) || b.ts - a.ts);
-  history = history.slice(0, 120);
-  ls.set('werf.history', history);
+  days = days.filter((h) => dayKey(dateOf(h)) !== k);
+  days.push(entry);
+  days.sort((a, b) => dateOf(b) - dateOf(a) || b.ts - a.ts);
+  days = days.slice(0, 120);
+  ls.set('werf.history', days);
 }
 
 function historyHTML() {
-  if (!history.length) return '';
+  if (!days.length) return '';
   return `<section class="hist" id="hist">
     <h3>Geçmiş</h3>
-    ${history.map((h, i) => {
+    ${days.map((h, i) => {
       const t = dayTitle(dateOf(h));
       const open = i === 0;
       return `<div class="day ${open ? 'open' : ''}">
@@ -175,7 +175,7 @@ function home() {
     ${historyHTML()}`;
   $('pick').addEventListener('click', () => $('file').click());
   bindHistory();
-  if (reduced) return;
+  if (reduced) { if (!introDone) { introDone = true; setTimeout(() => openNameSheet(true), 100); } return; }
   if (!introDone) {
     introDone = true;
     const reveal = () => {
@@ -184,7 +184,7 @@ function home() {
       document.querySelectorAll('.topo path').forEach((p) => { p.style.strokeDashoffset = '0'; });
     };
     const guard = setTimeout(reveal, 4000);
-    intro().catch(reveal).finally(() => clearTimeout(guard));
+    intro().catch(reveal).finally(() => { clearTimeout(guard); setTimeout(() => openNameSheet(true), 250); });
     return;
   }
   animate('.drop .ico', { y: [-30, 0], rotate: [-12, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
@@ -595,15 +595,18 @@ async function choreograph(n, boxes) {
 }
 
 /* ---------- isim ---------- */
-$('who').addEventListener('click', () => {
+$('who').addEventListener('click', () => openNameSheet(false));
+
+function openNameSheet(start) {
+  if (document.querySelector('.sheet')) return;
   history.pushState({ s: 1 }, '');
   const scrim = document.createElement('div');
   scrim.className = 'scrim';
   const sh = document.createElement('div');
   sh.className = 'sheet';
   sh.setAttribute('role', 'dialog');
-  sh.innerHTML = `<div class="grip"></div><h2>Kimi arayalım?</h2><p>Listede bu isim aranır. Ad yeterli, istersen soyadını da yaz.</p>
-    <input id="nm" value="${esc(name)}" autocomplete="off" /><button class="go" id="nmSave">Kaydet</button>`;
+  sh.innerHTML = `<div class="grip"></div><h2>${start ? 'Kimin adresini arayalım?' : 'İsmi değiştir'}</h2><p>Listede bu isim aranır. Ad yeterli, istersen soyadını da yaz.</p>
+    <input id="nm" value="${esc(name)}" autocomplete="off" autocapitalize="words" enterkeyhint="done" /><button class="go" id="nmSave">${start ? 'Devam' : 'Kaydet'}</button>`;
   document.body.append(scrim, sh);
   animate(scrim, { opacity: 1 }, { duration: 0.2 });
   if (!reduced) animate(sh, { y: ['100%', '0%'] }, { type: 'spring', stiffness: 240, damping: 26 });
@@ -619,13 +622,19 @@ $('who').addEventListener('click', () => {
   const onPop = () => close(true);
   window.addEventListener('popstate', onPop);
   scrim.addEventListener('click', () => close(false));
-  sh.querySelector('#nmSave').addEventListener('click', () => {
+  const submit = () => {
     const v = sh.querySelector('#nm').value.trim();
+    const changed = v && v !== name;
     if (v) { name = v; ls.set('werf.name', name); renderWho(); }
+    sh.querySelector('#nm').blur();
     close(false);
-    if (current && $('sheetImg')) show(); else home();
-  });
-});
+    if (!changed) return;
+    if (current && $('sheetImg')) show();
+    else { const p = document.querySelector('.drop p'); if (p) p.textContent = `Ekran görüntüsünü seç, ${name} için adres ve harita linki çıksın.`; }
+  };
+  sh.querySelector('#nmSave').addEventListener('click', submit);
+  sh.querySelector('#nm').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+}
 
 if (Capacitor.isNativePlatform()) {
   StatusBar.setBackgroundColor({ color: '#1C1F22' }).catch(() => {});
