@@ -7,6 +7,7 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import { cleanGrid } from './prep.js';
 import { analyze, mapsUrl } from './parse.js';
 import { t, setLang, getLang, locale, LANGS } from './i18n.js';
+import { openGuide } from './guide.js';
 
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* yok */ } };
@@ -16,9 +17,10 @@ const ls = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* dolu */ } },
 };
 
-const askName = ls.get('werf.name', null) === null;
+const askName = !ls.get('werf.name', '');
+const askGuide = !ls.get('werf.guided', false);
 setLang(ls.get('werf.lang', 'en'));
-let name = ls.get('werf.name', 'Levent');
+let name = ls.get('werf.name', '');
 let current = null; // { url, words, W, H, colorOf }
 
 /* ---------- ikonlar ---------- */
@@ -58,7 +60,7 @@ const app = document.getElementById('app');
 app.innerHTML = `
   <header class="top">
     <button class="mark" id="homeBtn" aria-label="${t('home')}">${I.logo}<span class="word">Werf</span></button>
-    <button class="who" id="who" aria-label="${t('whoLabel')}"><span class="lang-tag" id="langTag"></span><span id="whoName"></span></button>
+    <div class="tools"><button class="help" id="helpBtn" aria-label="${t('help')}">?</button><button class="who" id="who" aria-label="${t('whoLabel')}"><span class="lang-tag" id="langTag"></span><span id="whoName"></span></button></div>
   </header>
   <main id="view"></main>
   <input type="file" id="file" accept="image/*" hidden />
@@ -70,7 +72,7 @@ const NATIVE = Capacitor.isNativePlatform();
 const mapHref = (q) => (NATIVE ? `geo:0,0?q=${encodeURIComponent(q)}` : mapsUrl(q));
 const routeHref = (qs) => `https://www.google.com/maps/dir//${qs.map((q) => encodeURIComponent(q)).join('/')}`;
 $('homeBtn').addEventListener('click', () => { current = null; home(); window.scrollTo(0, 0); });
-const renderWho = () => { $('whoName').textContent = name; $('langTag').textContent = getLang().toUpperCase(); $('homeBtn').setAttribute('aria-label', t('home')); $('who').setAttribute('aria-label', t('whoLabel')); };
+const renderWho = () => { $('whoName').textContent = name || t('namePh'); $('helpBtn').setAttribute('aria-label', t('help')); $('langTag').textContent = getLang().toUpperCase(); $('homeBtn').setAttribute('aria-label', t('home')); $('who').setAttribute('aria-label', t('whoLabel')); };
 renderWho();
 
 function toast(msg) {
@@ -174,12 +176,12 @@ function home() {
     <button class="drop" id="pick">
       <div class="ico">${I.image}</div>
       <h1>${t('dropTitle')}</h1>
-      <p>${esc(t('dropText', { name }))}</p>
+      <p>${esc(name ? t('dropText', { name }) : t('dropText0'))}</p>
     </button>
     ${historyHTML()}`;
-  $('pick').addEventListener('click', () => $('file').click());
+  $('pick').addEventListener('click', () => (name ? $('file').click() : openNameSheet(true)));
   bindHistory();
-  if (reduced) { if (!introDone) { introDone = true; if (askName) setTimeout(() => openNameSheet(true), 100); } return; }
+  if (reduced) { if (!introDone) { introDone = true; setTimeout(startFlow, 100); } return; }
   if (!introDone) {
     introDone = true;
     const reveal = () => {
@@ -188,7 +190,7 @@ function home() {
       document.querySelectorAll('.topo path').forEach((p) => { p.style.strokeDashoffset = '0'; });
     };
     const guard = setTimeout(reveal, 4000);
-    intro().catch(reveal).finally(() => { clearTimeout(guard); if (askName) setTimeout(() => openNameSheet(true), 250); });
+    intro().catch(reveal).finally(() => { clearTimeout(guard); setTimeout(startFlow, 250); });
     return;
   }
   animate('.drop .ico', { y: [-30, 0], rotate: [-12, 0], opacity: [0, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
@@ -655,12 +657,22 @@ async function choreograph(n, boxes) {
   animate('.sites, .row2.end', { opacity: [0, 1], y: [16, 0] }, { duration: 0.4, delay: 0.3 });
 }
 
+/* ---------- rehber ---------- */
+function showGuide() {
+  openGuide({ reduced, onClose: () => ls.set('werf.guided', true) });
+}
+function startFlow() {
+  if (askName) openNameSheet(true, () => { if (askGuide) showGuide(); });
+  else if (askGuide) showGuide();
+}
+$('helpBtn').addEventListener('click', showGuide);
+
 /* ---------- isim ---------- */
 $('who').addEventListener('click', () => openNameSheet(false));
 
-function openNameSheet(start) {
+function openNameSheet(start, after) {
   if (document.querySelector('.sheet')) return;
-  history.pushState({ s: 1 }, '');
+  if (!start) history.pushState({ s: 1 }, '');
   const scrim = document.createElement('div');
   scrim.className = 'scrim';
   const sh = document.createElement('div');
@@ -674,11 +686,16 @@ function openNameSheet(start) {
       <div class="lab">${t('langLabel')}</div>
       <div class="langs" role="group" aria-label="${t('langLabel')}">${LANGS.map((l) => `<button class="lang ${l.code === pick ? 'on' : ''}" data-lang="${l.code}" aria-pressed="${l.code === pick}">${l.label}</button>`).join('')}</div>
       <div class="lab">${t('nameLabel')}</div>
-      <input id="nm" value="${esc(prev)}" autocomplete="off" autocapitalize="words" enterkeyhint="done" />
+      <input id="nm" value="${esc(prev)}" placeholder="${t('namePh')}" autocomplete="off" autocapitalize="words" enterkeyhint="done" />
       <p>${t('nameHint')}</p>
       <button class="go" id="nmSave">${start ? t('cont') : t('save')}</button>`;
-    sh.querySelector('#nmSave').addEventListener('click', submit);
-    sh.querySelector('#nm').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    const btn = sh.querySelector('#nmSave');
+    const inp = sh.querySelector('#nm');
+    const sync = () => { btn.disabled = !inp.value.trim(); };
+    sync();
+    inp.addEventListener('input', sync);
+    btn.addEventListener('click', submit);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
     sh.querySelectorAll('[data-lang]').forEach((bt) => bt.addEventListener('click', () => {
       pick = bt.dataset.lang;
       paintSheet();
@@ -694,15 +711,18 @@ function openNameSheet(start) {
     closed = true;
     setLang(ls.get('werf.lang', 'en'));
     window.removeEventListener('popstate', onPop);
-    if (!fromPop) history.back();
+    if (!fromPop && !start) history.back();
     animate(scrim, { opacity: 0 }, { duration: 0.2 });
     animate(sh, { y: '100%' }, { duration: 0.22, ease: 'easeIn' }).then(() => { scrim.remove(); sh.remove(); });
   };
   const onPop = () => close(true);
-  window.addEventListener('popstate', onPop);
-  scrim.addEventListener('click', () => close(false));
+  if (!start) {
+    window.addEventListener('popstate', onPop);
+    scrim.addEventListener('click', () => close(false));
+  }
   function submit() {
     const v = sh.querySelector('#nm').value.trim();
+    if (!v) { sh.querySelector('#nm').focus(); return; }
     const langChanged = pick !== ls.get('werf.lang', 'en');
     const changed = v && v !== name;
     if (v) { name = v; ls.set('werf.name', name); }
@@ -711,9 +731,11 @@ function openNameSheet(start) {
     renderWho();
     sh.querySelector('#nm').blur();
     close(false);
-    if (!changed && !langChanged) return;
-    if (current && $('sheetImg')) show();
-    else home();
+    if (changed || langChanged) {
+      if (current && $('sheetImg')) show();
+      else home();
+    }
+    if (after) setTimeout(after, 350);
   }
   paintSheet();
 }
