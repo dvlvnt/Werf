@@ -6,6 +6,7 @@ import { Share } from '@capacitor/share';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { cleanGrid } from './prep.js';
 import { analyze, mapsUrl } from './parse.js';
+import { t, setLang, getLang, locale, LANGS } from './i18n.js';
 
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* yok */ } };
@@ -16,6 +17,7 @@ const ls = {
 };
 
 const askName = ls.get('werf.name', null) === null;
+setLang(ls.get('werf.lang', 'en'));
 let name = ls.get('werf.name', 'Levent');
 let current = null; // { url, words, W, H, colorOf }
 
@@ -55,8 +57,8 @@ document.body.insertAdjacentHTML('afterbegin', topo());
 const app = document.getElementById('app');
 app.innerHTML = `
   <header class="top">
-    <button class="mark" id="homeBtn" aria-label="Ana ekran">${I.logo}<span class="word">Werf</span></button>
-    <button class="who" id="who" aria-label="Aranacak isim">${I.edit}<span id="whoName"></span></button>
+    <button class="mark" id="homeBtn" aria-label="${t('home')}">${I.logo}<span class="word">Werf</span></button>
+    <button class="who" id="who" aria-label="${t('whoLabel')}"><span class="lang-tag" id="langTag"></span><span id="whoName"></span></button>
   </header>
   <main id="view"></main>
   <input type="file" id="file" accept="image/*" hidden />
@@ -68,7 +70,7 @@ const NATIVE = Capacitor.isNativePlatform();
 const mapHref = (q) => (NATIVE ? `geo:0,0?q=${encodeURIComponent(q)}` : mapsUrl(q));
 const routeHref = (qs) => `https://www.google.com/maps/dir//${qs.map((q) => encodeURIComponent(q)).join('/')}`;
 $('homeBtn').addEventListener('click', () => { current = null; home(); window.scrollTo(0, 0); });
-const renderWho = () => { $('whoName').textContent = name; };
+const renderWho = () => { $('whoName').textContent = name; $('langTag').textContent = getLang().toUpperCase(); $('homeBtn').setAttribute('aria-label', t('home')); $('who').setAttribute('aria-label', t('whoLabel')); };
 renderWho();
 
 function toast(msg) {
@@ -80,8 +82,9 @@ function toast(msg) {
 }
 
 /* ---------- geçmiş ---------- */
-const DAY_TR = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
-const MON_TR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const cap = (x) => x.charAt(0).toLocaleUpperCase(locale()) + x.slice(1);
+const wd = (d) => cap(new Intl.DateTimeFormat(locale(), { weekday: 'long' }).format(d));
+const dm = (d, y) => new Intl.DateTimeFormat(locale(), y ? { day: 'numeric', month: 'long', year: 'numeric' } : { day: 'numeric', month: 'long' }).format(d);
 function dateOf(entry) {
   const m = entry.date && entry.date.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
   if (m) {
@@ -95,11 +98,11 @@ function dayTitle(d) {
   const today = new Date();
   const tom = new Date(); tom.setDate(today.getDate() + 1);
   const yes = new Date(); yes.setDate(today.getDate() - 1);
-  const base = `${d.getDate()} ${MON_TR[d.getMonth()]}`;
-  if (dayKey(d) === dayKey(today)) return { main: 'Bugün', sub: `${DAY_TR[d.getDay()]}, ${base}` };
-  if (dayKey(d) === dayKey(tom)) return { main: 'Yarın', sub: `${DAY_TR[d.getDay()]}, ${base}` };
-  if (dayKey(d) === dayKey(yes)) return { main: 'Dün', sub: `${DAY_TR[d.getDay()]}, ${base}` };
-  return { main: DAY_TR[d.getDay()], sub: `${base} ${d.getFullYear()}` };
+  const sub = `${wd(d)}, ${dm(d)}`;
+  if (dayKey(d) === dayKey(today)) return { main: t('today'), sub };
+  if (dayKey(d) === dayKey(tom)) return { main: t('tomorrow'), sub };
+  if (dayKey(d) === dayKey(yes)) return { main: t('yesterday'), sub };
+  return { main: wd(d), sub: dm(d, true) };
 }
 
 let days = ls.get('werf.history', null);
@@ -120,7 +123,7 @@ function remember(entry) {
 function historyHTML() {
   if (!days.length) return '';
   return `<section class="hist" id="hist">
-    <h3>Geçmiş</h3>
+    <h3>${t('history')}</h3>
     ${days.map((h, i) => {
       const t = dayTitle(dateOf(h));
       const open = i === 0;
@@ -170,8 +173,8 @@ function home() {
   $('view').innerHTML = `
     <button class="drop" id="pick">
       <div class="ico">${I.image}</div>
-      <h1>Günlük listeyi yükle</h1>
-      <p>Ekran görüntüsünü seç, ${esc(name)} için adres ve harita linki çıksın.</p>
+      <h1>${t('dropTitle')}</h1>
+      <p>${esc(t('dropText', { name }))}</p>
     </button>
     ${historyHTML()}`;
   $('pick').addEventListener('click', () => $('file').click());
@@ -250,16 +253,16 @@ async function intro() {
 let workerP = null;
 let onProgress = () => {};
 let onStage = () => {};
-let lastStage = 'başlıyor';
+let lastStage = 'starting';
 const STAGES = {
-  'loading tesseract core': 'Okuma motoru yükleniyor',
-  'initializing tesseract': 'Okuma motoru başlatılıyor',
-  'initialized tesseract': 'Okuma motoru hazır',
-  'loading language traineddata': 'Dil dosyası yükleniyor',
-  'loaded language traineddata': 'Dil dosyası yüklendi',
-  'initializing api': 'Hazırlanıyor',
-  'initialized api': 'Hazır',
-  'recognizing text': 'Yazılar çözülüyor',
+  'loading tesseract core': 'st_core',
+  'initializing tesseract': 'st_init',
+  'initialized tesseract': 'st_ready',
+  'loading language traineddata': 'st_lang',
+  'loaded language traineddata': 'st_langok',
+  'initializing api': 'st_prep',
+  'initialized api': 'st_ok',
+  'recognizing text': 'st_read',
 };
 // Telefonun çekirdek sayısına göre 1-3 okuyucu paralel çalışır
 const POOL = Math.min(3, Math.max(1, Math.floor((navigator.hardwareConcurrency || 2) / 2)));
@@ -277,7 +280,7 @@ function getWorkers() {
         cacheMethod: 'none',
         logger: (m) => {
           lastStage = m.status;
-          onStage(STAGES[m.status] || m.status);
+          onStage(STAGES[m.status] ? t(STAGES[m.status]) : m.status);
           if (m.status === 'recognizing text') {
             prog[k] = m.progress;
             const vals = Object.values(prog);
@@ -397,10 +400,10 @@ async function run(file) {
   $('view').innerHTML = `
     <div class="stage" id="stage">
       <div class="scroller" id="scroller">
-        <div class="sheet-img" id="sheetImg"><img id="img" alt="Yüklenen liste" /><div class="dim" id="dim"></div></div>
+        <div class="sheet-img" id="sheetImg"><img id="img" alt="${t('uploaded')}" /><div class="dim" id="dim"></div></div>
       </div>
       <div class="scan" id="scan"></div>
-      <div class="status" id="status"><span id="stTxt">Liste okunuyor</span><div class="bar"><i id="barI"></i></div></div>
+      <div class="status" id="status"><span id="stTxt">${t('st_list')}</span><div class="bar"><i id="barI"></i></div></div>
     </div>
     <div id="out"></div>`;
   $('img').src = url;
@@ -418,16 +421,16 @@ async function run(file) {
   onStage = (t) => { tick = Date.now(); const el = $('stTxt'); if (el) el.textContent = t; };
   let watch;
   const stall = new Promise((_, rej) => {
-    watch = setInterval(() => { if (Date.now() - tick > 45000) rej(new Error(`45 saniyedir ilerleme yok (${lastStage})`)); }, 1000);
+    watch = setInterval(() => { if (Date.now() - tick > 45000) rej(new Error(t('stall', { stage: lastStage }))); }, 1000);
   });
 
   try {
-    onStage('Resim hazırlanıyor');
+    onStage(t('st_img'));
     const img = await loadImg(url);
     const prep = await prepare(img);
-    onStage('Okuma motoru yükleniyor');
+    onStage(t('st_core'));
     const workers = await Promise.race([getWorkers(), stall]);
-    onStage('Yazılar çözülüyor');
+    onStage(t('st_read'));
     Object.keys(prog).forEach((k) => delete prog[k]);
     const pieces = plan(prep.clean, prep.w1, prep.h1, workers.length).map((r) => {
       const c = document.createElement('canvas');
@@ -461,8 +464,8 @@ async function run(file) {
     clearInterval(watch);
     if (scanAnim) scanAnim.stop();
     workerP = null;
-    $('view').innerHTML = `<div class="miss"><h2>Liste okunamadı</h2><p>Okuma tamamlanamadı. Tekrar dene. Yine olmazsa bu ekranın görüntüsünü gönder.</p><p style="font-size:13px">Ayrıntı: ${esc(err && err.message ? err.message : String(err))} · ${esc(lastStage)}</p></div>
-      <button class="again" id="again">Başka resim seç</button>`;
+    $('view').innerHTML = `<div class="miss"><h2>${t('failTitle')}</h2><p>${t('failText')}</p><p style="font-size:13px">${t('detail')}: ${esc(err && err.message ? err.message : String(err))} · ${esc(lastStage)}</p></div>
+      <button class="again" id="again">${t('pickOther')}</button>`;
     $('again').addEventListener('click', () => $('file').click());
     console.error(err);
   }
@@ -486,7 +489,7 @@ function show() {
 
   const sitesHTML = r.sites.length ? `
     <section class="sites">
-      <h3>Listedeki şantiyeler</h3>
+      <h3>${t('sitesTitle')}</h3>
       ${r.sites.map((s) => `<a class="site" href="${esc(mapHref(s.query))}" target="_blank" rel="noopener"><div><b>${esc(s.street)}</b><span>${esc(s.company)}</span></div>${I.arrow}</a>`).join('')}
     </section>` : '';
 
@@ -494,11 +497,11 @@ function show() {
     animate('#dim', { opacity: 0 }, { duration: 0.2 });
     out.innerHTML = `
       <div class="miss">
-        <h2>${r.found ? `${esc(name)} için adres yok` : `${esc(name)} listede yok`}</h2>
-        <p>${r.found ? 'İsmin yanındaki sütunda adres bulunamadı.' : 'İsim okunamadı ya da bu listede değil. Üstten ismi kontrol et ya da aşağıdan şantiyeyi seç.'}</p>
+        <h2>${esc(t(r.found ? 'noAddrTitle' : 'notFoundTitle', { name }))}</h2>
+        <p>${t(r.found ? 'noAddrText' : 'notFoundText')}</p>
       </div>
       ${sitesHTML}
-      <button class="again" id="again">Başka liste yükle</button>`;
+      <button class="again" id="again">${t('loadOther')}</button>`;
     $('again').addEventListener('click', () => $('file').click());
     if (!reduced) animate('.miss, .sites, .again', { opacity: [0, 1], y: [20, 0] }, { duration: 0.35 });
     return;
@@ -524,7 +527,7 @@ function show() {
 
   const stops = list.map((s) => ({ ...s, q: s.query }));
   const hasMap = (s) => !(s.plain && !/\d/.test(s.street));
-  const LABEL = { MON: 'Kurulum (MON)', DEM: 'Söküm (DEM)' };
+  const LABEL = { MON: t('kind_MON'), DEM: t('kind_DEM') };
   const multi = stops.length > 1;
   const routeUrl = () => {
     const qs = stops.filter(hasMap).map((s) => s.q);
@@ -542,7 +545,7 @@ function show() {
         <div class="pin-wrap"><span class="ring" id="ring"></span><span class="pin" id="pin" style="color:var(--orange)">${I.pin(34)}</span></div>
         <div>
           ${r.date ? `<span class="date">${esc(r.date)}</span>` : ''}
-          ${multi ? `<div class="count">${stops.length} adres</div>` : ''}
+          ${multi ? `<div class="count">${t('addrCount', { n: stops.length })}</div>` : ''}
         </div>
       </div>
       ${stops.map((s, i) => `
@@ -554,23 +557,23 @@ function show() {
             <div class="street">${esc(s.street)}</div>
             ${s.city ? `<div class="city">${esc(s.city)}</div>` : ''}
             ${s.notes && s.notes.length ? `<div class="notes">${s.notes.map((x) => `<span class="note">${esc(x)}</span>`).join('')}</div>` : ''}
-            ${hasMap(s) ? `<a class="go ${multi ? 'small' : ''}" data-go="${i}" href="${esc(mapHref(s.q))}" target="_blank" rel="noopener">${I.pin(20)}Haritada aç</a>` : ''}
-            <div class="edit"><input data-q="${i}" value="${esc(s.q)}" aria-label="Harita araması" /><small>Okuma hatalıysa buradan düzelt, link hemen güncellenir.</small></div>
+            ${hasMap(s) ? `<a class="go ${multi ? 'small' : ''}" data-go="${i}" href="${esc(mapHref(s.q))}" target="_blank" rel="noopener">${I.pin(20)}${t('openMap')}</a>` : ''}
+            <div class="edit"><input data-q="${i}" value="${esc(s.q)}" aria-label="${t('mapSearch')}" /><small>${t('fixHint')}</small></div>
           </div>
         </section>`).join('')}
-      ${multi && routeUrl() ? `<a class="go route-btn" id="routeBtn" href="${esc(routeUrl())}" target="_blank" rel="noopener">${I.arrow}Rotayı aç (${stops.filter(hasMap).length} durak)</a>` : ''}
+      ${multi && routeUrl() ? `<a class="go route-btn" id="routeBtn" href="${esc(routeUrl())}" target="_blank" rel="noopener">${I.arrow}${t('route', { n: stops.filter(hasMap).length })}</a>` : ''}
       <div class="row2">
-        <button class="sec" id="copy">Kopyala</button>
-        <button class="sec" id="share">Paylaş</button>
-        <button class="sec" id="fix" aria-pressed="false">Düzelt</button>
+        <button class="sec" id="copy">${t('copy')}</button>
+        <button class="sec" id="share">${t('share')}</button>
+        <button class="sec" id="fix" aria-pressed="false">${t('fix')}</button>
       </div>
-      ${r.mates.length ? `<div class="meta"><div><div class="lbl">Ekipte</div><div class="val">${r.mates.map(esc).join(', ')}</div></div></div>` : ''}
+      ${r.mates.length ? `<div class="meta"><div><div class="lbl">${t('crew')}</div><div class="val">${r.mates.map(esc).join(', ')}</div></div></div>` : ''}
     </article>
     ${sitesHTML}
-    <div class="row2 end"><button class="again" id="again">Yeni liste yükle</button><button class="again" id="toHist">Geçmiş</button></div>`;
+    <div class="row2 end"><button class="again" id="again">${t('newList')}</button><button class="again" id="toHist">${t('history')}</button></div>`;
 
   const allText = () => stops.map((s, i) => `${multi ? `${i + 1}. ` : ''}${s.company ? `${s.company}\n` : ''}${s.q}${hasMap(s) ? `\n${mapsUrl(s.q)}` : ''}`).join('\n\n')
-    + (multi && routeUrl() ? `\n\nRota: ${routeUrl()}` : '');
+    + (multi && routeUrl() ? `\n\n${t('routeWord')}: ${routeUrl()}` : '');
   out.querySelectorAll('[data-q]').forEach((inp) => inp.addEventListener('input', () => {
     const i = +inp.dataset.q;
     stops[i].q = inp.value.trim() || list[i].query;
@@ -587,14 +590,14 @@ function show() {
     if (on) out.querySelector('[data-q]').focus();
   });
   $('copy').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(allText()); toast(multi ? 'Adresler kopyalandı' : 'Link kopyalandı'); } catch { toast('Kopyalanamadı'); }
+    try { await navigator.clipboard.writeText(allText()); toast(multi ? t('copiedAll') : t('copiedLink')); } catch { toast(t('copyFail')); }
   });
   $('share').addEventListener('click', async () => {
     const text = allText();
     try {
-      if (Capacitor.isNativePlatform()) await Share.share({ title: 'Adres', text });
+      if (Capacitor.isNativePlatform()) await Share.share({ title: t('shareTitle'), text });
       else if (navigator.share) await navigator.share({ text });
-      else { await navigator.clipboard.writeText(text); toast('Kopyalandı'); }
+      else { await navigator.clipboard.writeText(text); toast(t('copied')); }
     } catch { /* iptal */ }
   });
   $('again').addEventListener('click', () => $('file').click());
@@ -663,8 +666,25 @@ function openNameSheet(start) {
   const sh = document.createElement('div');
   sh.className = 'sheet';
   sh.setAttribute('role', 'dialog');
-  sh.innerHTML = `<div class="grip"></div><h2>${start ? 'Kimin adresini arayalım?' : 'İsmi değiştir'}</h2><p>Listede bu isim aranır. Ad yeterli, istersen soyadını da yaz.</p>
-    <input id="nm" value="${esc(name)}" autocomplete="off" autocapitalize="words" enterkeyhint="done" /><button class="go" id="nmSave">${start ? 'Devam' : 'Kaydet'}</button>`;
+  let pick = getLang();
+  const paintSheet = () => {
+    const prev = sh.querySelector('#nm') ? sh.querySelector('#nm').value : name;
+    setLang(pick);
+    sh.innerHTML = `<div class="grip"></div><h2>${start ? t('askTitle') : t('editTitle')}</h2>
+      <div class="lab">${t('langLabel')}</div>
+      <div class="langs" role="group" aria-label="${t('langLabel')}">${LANGS.map((l) => `<button class="lang ${l.code === pick ? 'on' : ''}" data-lang="${l.code}" aria-pressed="${l.code === pick}">${l.label}</button>`).join('')}</div>
+      <div class="lab">${t('nameLabel')}</div>
+      <input id="nm" value="${esc(prev)}" autocomplete="off" autocapitalize="words" enterkeyhint="done" />
+      <p>${t('nameHint')}</p>
+      <button class="go" id="nmSave">${start ? t('cont') : t('save')}</button>`;
+    sh.querySelector('#nmSave').addEventListener('click', submit);
+    sh.querySelector('#nm').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    sh.querySelectorAll('[data-lang]').forEach((bt) => bt.addEventListener('click', () => {
+      pick = bt.dataset.lang;
+      paintSheet();
+      if (!reduced) animate(sh.querySelector('h2'), { opacity: [0, 1], y: [6, 0] }, { duration: 0.25 });
+    }));
+  };
   document.body.append(scrim, sh);
   animate(scrim, { opacity: 1 }, { duration: 0.2 });
   if (!reduced) animate(sh, { y: ['100%', '0%'] }, { type: 'spring', stiffness: 240, damping: 26 });
@@ -672,6 +692,7 @@ function openNameSheet(start) {
   const close = (fromPop) => {
     if (closed) return;
     closed = true;
+    setLang(ls.get('werf.lang', 'en'));
     window.removeEventListener('popstate', onPop);
     if (!fromPop) history.back();
     animate(scrim, { opacity: 0 }, { duration: 0.2 });
@@ -680,18 +701,21 @@ function openNameSheet(start) {
   const onPop = () => close(true);
   window.addEventListener('popstate', onPop);
   scrim.addEventListener('click', () => close(false));
-  const submit = () => {
+  function submit() {
     const v = sh.querySelector('#nm').value.trim();
+    const langChanged = pick !== ls.get('werf.lang', 'en');
     const changed = v && v !== name;
-    if (v) { name = v; ls.set('werf.name', name); renderWho(); }
+    if (v) { name = v; ls.set('werf.name', name); }
+    ls.set('werf.lang', pick);
+    setLang(pick);
+    renderWho();
     sh.querySelector('#nm').blur();
     close(false);
-    if (!changed) return;
+    if (!changed && !langChanged) return;
     if (current && $('sheetImg')) show();
-    else { const p = document.querySelector('.drop p'); if (p) p.textContent = `Ekran görüntüsünü seç, ${name} için adres ve harita linki çıksın.`; }
-  };
-  sh.querySelector('#nmSave').addEventListener('click', submit);
-  sh.querySelector('#nm').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    else home();
+  }
+  paintSheet();
 }
 
 if (Capacitor.isNativePlatform()) {
